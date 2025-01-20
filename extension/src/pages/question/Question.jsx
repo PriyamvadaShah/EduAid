@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts} from 'pdf-lib';
 import "../../index.css";
 import logo from "../../assets/aossie_logo.webp";
 
@@ -77,6 +77,37 @@ function Question() {
         });
       }
 
+      if (questionType === "get_matching" && qaPairsFromStorage["output"]) {
+        const matchingQuestions = qaPairsFromStorage["output"].matching_questions;
+        console.log(qaPairsFromStorage["output"]);
+        if (matchingQuestions && Array.isArray(matchingQuestions)) {
+          matchingQuestions.forEach((pair) => {
+            combinedQaPairs.push({
+              left_item: pair.term || pair.left,
+              right_item: pair.definition || pair.right,
+              question_type: "Matching",
+              id: pair.id || Math.random().toString(36).substr(2, 9),
+              isMatched: false
+            });
+          });
+  
+          const shuffledRightItems = shuffleArray([...combinedQaPairs.map(pair => ({
+            item: pair.right_item,
+            id: pair.id
+          }))]);
+          console.log("/", combinedQaPairs);
+          setQaPairs([{
+            question: "Match the following",
+            originalPairs: combinedQaPairs,
+            shuffledRightItems: shuffledRightItems,
+            currentMatches: new Map(),
+            question_type: "Matching"
+          }]);
+          console.log(qaPairs);
+          return; // Add this to prevent further processing
+        }
+      }
+
       if (questionType == "get_boolq") {
         qaPairsFromStorage["output"].forEach((qaPair) => {
           combinedQaPairs.push({
@@ -123,85 +154,132 @@ function Question() {
   };
 
   const generatePDF = async () => {
-    const pdfDoc = await PDFDocument.create();
-    let page = pdfDoc.addPage();
-    const d = new Date(Date.now());
-    page.drawText('EduAid generated Quiz', { x: 50, y: 800, size: 20 });
-    page.drawText('Created On: ' + d.toString(), { x: 50, y: 770, size: 10 });
-    const form = pdfDoc.getForm();
-    let y = 700; // Starting y position for content
-    let questionIndex = 1;
-
-    qaPairs.forEach((qaPair) => {
-        if (y < 50) {
-            page = pdfDoc.addPage();
-            y = 700;
-        }
-
-        page.drawText(`Q${questionIndex}) ${qaPair.question}`, { x: 50, y, size: 15 });
-        y -= 30;
-
-        if (qaPair.question_type === "Boolean") {
-            // Create radio buttons for True/False
-            const radioGroup = form.createRadioGroup(`question${questionIndex}_answer`);
-            const drawRadioButton = (text, selected) => {
-                const options = {
-                    x: 70,
-                    y,
-                    width: 15,
-                    height: 15,
-                };
-
-                radioGroup.addOptionToPage(text, page, options);
-                page.drawText(text, { x: 90, y: y + 2, size: 12 });
-                y -= 20;
-            };
-
-            drawRadioButton('True', false);
-            drawRadioButton('False', false);
-        } else if (qaPair.question_type === "MCQ" || qaPair.question_type === "MCQ_Hard") {
-            // Shuffle options including qaPair.answer
-            const options = [...qaPair.options, qaPair.answer]; // Include correct answer in options
-            options.sort(() => Math.random() - 0.5); // Shuffle options randomly
-
-            const radioGroup = form.createRadioGroup(`question${questionIndex}_answer`);
-
-            options.forEach((option, index) => {
-                const drawRadioButton = (text, selected) => {
-                    const radioOptions = {
-                        x: 70,
-                        y,
-                        width: 15,
-                        height: 15,
-                    };
-                    radioGroup.addOptionToPage(text, page, radioOptions);
-                    page.drawText(text, { x: 90, y: y + 2, size: 12 });
-                    y -= 20;
-                };
-                drawRadioButton(option, false);
-            });
-        } else if (qaPair.question_type === "Short") {
-            // Text field for Short answer
-            const answerField = form.createTextField(`question${questionIndex}_answer`);
-            answerField.setText("");
-            answerField.addToPage(page, { x: 50, y: y - 20, width: 450, height: 20 });
-            y -= 40;
-        }
-
-        y -= 20; // Space between questions
-        questionIndex += 1;
-    });
-
-    // Save PDF and create download link
-    const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = "generated_questions.pdf";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-};
+      const pdfDoc = await PDFDocument.create();
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      let page = pdfDoc.addPage();
+      const d = new Date(Date.now());
+  
+      // Helper function for safe text drawing
+      const drawSafeText = (text, x, y, options = {}) => {
+          try {
+              page.drawText(text, {
+                  font: helveticaFont,
+                  ...options,
+                  x,
+                  y,
+              });
+          } catch (error) {
+              // Fallback for problematic characters
+              const safeText = text.normalize('NFKD')
+                                  .replace(/[\u0300-\u036f]/g, '')
+                                  .replace(/[^\x00-\x7F]/g, '');
+              page.drawText(safeText, {
+                  font: helveticaFont,
+                  ...options,
+                  x,
+                  y,
+              });
+          }
+      };
+  
+      // Replace original drawText calls with drawSafeText
+      drawSafeText("EduAid generated Quiz", 50, 800, { size: 20 });
+      drawSafeText("Created On: " + d.toString(), 50, 770, { size: 10 });
+  
+      const form = pdfDoc.getForm();
+      let y = 700;
+      let questionIndex = 1;
+  
+      qaPairs.forEach((qaPair) => {
+          if (y < 50) {
+              page = pdfDoc.addPage();
+              y = 700;
+          }
+  
+          drawSafeText(`Q${questionIndex}) ${qaPair.question}`, 50, y, { size: 15 });
+          y -= 30;
+  
+          if (qaPair.question_type === "Boolean") {
+              const radioGroup = form.createRadioGroup(`question${questionIndex}_answer`);
+              ["True", "False"].forEach((text) => {
+                  const options = { x: 70, y, width: 15, height: 15 };
+                  radioGroup.addOptionToPage(text, page, options);
+                  drawSafeText(text, 90, y + 2, { size: 12 });
+                  y -= 20;
+              });
+          } else if (qaPair.question_type === "MCQ" || qaPair.question_type === "MCQ_Hard") {
+              const options = [...qaPair.options, qaPair.answer];
+              options.sort(() => Math.random() - 0.5);
+  
+              const radioGroup = form.createRadioGroup(`question${questionIndex}_answer`);
+              options.forEach((option) => {
+                  const radioOptions = { x: 70, y, width: 15, height: 15 };
+                  radioGroup.addOptionToPage(option, page, radioOptions);
+                  drawSafeText(option, 90, y + 2, { size: 12 });
+                  y -= 20;
+              });
+          } else if (qaPair.question_type === "Short") {
+              const answerField = form.createTextField(`question${questionIndex}_answer`);
+              answerField.setText("");
+              answerField.addToPage(page, { x: 50, y: y - 20, width: 450, height: 20 });
+              y -= 40;
+          } else if (qaPair.question_type === "Matching") {
+              const leftColumnX = 40;
+              const rightColumnX = 150;
+              const rowHeight = 90;
+              const leftColumnWidth = 100;
+              const rightColumnWidth = 400;
+              const fontSize = 10;
+  
+              qaPair.leftItems = qaPair.originalPairs;
+              qaPair.rightItems = qaPair.shuffledRightItems;
+  
+              if (!qaPair.leftItems || !qaPair.rightItems || qaPair.leftItems.length !== qaPair.rightItems.length) {
+                  console.error(`Invalid matching question data at index ${questionIndex}`);
+                  return;
+              }
+  
+              drawSafeText("Column A", leftColumnX, y, { size: fontSize });
+              drawSafeText("Column B", rightColumnX, y, { size: fontSize });
+              y -= 30;
+  
+              qaPair.leftItems.forEach((leftItem, index) => {
+                  if (y < 50) {
+                      page = pdfDoc.addPage();
+                      y = 700;
+                  }
+  
+                  // Changed to use drawSafeText for left items
+                  drawSafeText(`${index + 1}. ${leftItem.left_item}`, leftColumnX, y, {
+                      size: fontSize,
+                      maxWidth: leftColumnWidth
+                  });
+  
+                  // Changed to use drawSafeText for right items
+                  drawSafeText(`${index + 1}. ${qaPair.rightItems[index].item}`, rightColumnX, y, {
+                      size: fontSize,
+                      maxWidth: rightColumnWidth
+                  });
+  
+                  y -= rowHeight;
+              });
+  
+              y -= 40;
+          }
+  
+          questionIndex += 1;
+          y -= 20;
+      });
+  
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: "application/pdf" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "generated_questions.pdf";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
 
 
 
@@ -241,12 +319,54 @@ function Question() {
                     <div className="text-[#FFF4F4] text-[1rem] my-1">
                       {qaPair.question}
                     </div>
+                    {qaPair.question_type === "Matching" && qaPairs.map((qaPairSet, idx) => (
+                      <div key={idx}>
+                        <div className="text-[#E4E4E4] text-lg mb-4"></div>
+                        <table className="table-auto w-full border-collapse border border-[#E4E4E4]">
+                          <thead>
+                            <tr>
+                              <th className="border border-[#E4E4E4] p-2 text-left text-[#FFF4F4]">
+                                Left Items
+                              </th>
+                              <th className="border border-[#E4E4E4] p-2 text-left text-[#FFF4F4]">
+                                Shuffled Right Items
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {qaPairSet.originalPairs.map((pair, index) => (
+                              <tr key={index}>
+                                <td className="border border-[#E4E4E4] p-4 text-[#E4E4E4] text-sm">
+                                  {pair.left_item}
+                                </td>
+                                <td className="border border-[#E4E4E4] p-4 text-[#FFF4F4] text-sm">
+                                  {qaPairSet.shuffledRightItems[index]?.item || ""}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
                     {qaPair.question_type !== "Boolean" && (
                       <>
                         <div className="text-[#E4E4E4] text-sm">Answer</div>
                         <div className="text-[#FFF4F4] text-[1rem]">
-                          {qaPair.answer}
-                        </div>
+                        {qaPair.originalPairs && qaPair.originalPairs.length > 0 && (
+                          <div className="text-[#FFF4F4] text-[1rem] mt-2">
+                            {qaPair.originalPairs.map((question, idx) => (
+                              <div key={idx} className="mb-1">
+                                <span className="text-[#E4E4E4] text-sm">
+                                  {idx + 1}:
+                                </span>{" "}
+                                <span className="text-[#FFF4F4] text-[1rem]">
+                                  {`${question.left_item} - ${question.right_item}`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        </div>                     
                         {qaPair.options && qaPair.options.length > 0 && (
                           <div className="text-[#FFF4F4] text-[1rem]">
                             {shuffledOptions.map((option, idx) => (

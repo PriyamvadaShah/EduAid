@@ -36,6 +36,7 @@ ShortQGen = main.ShortQGenerator()
 qg = main.QuestionGenerator()
 docs_service = main.GoogleDocsService(SERVICE_ACCOUNT_FILE, SCOPES)
 file_processor = main.FileProcessor()
+MatchingGen= main.MatchingGenerator()
 mediawikiapi = MediaWikiAPI()
 qa_model = pipeline("question-answering")
 
@@ -359,6 +360,23 @@ def generate_gform():
     )
     return edit_url
 
+@app.route("/get_matching", methods=["POST"])
+def get_matching():
+    data = request.get_json()
+    
+    input_text = data.get("input_text", "")
+    use_mediawiki = data.get("use_mediawiki", 0)
+    if "max_questions" not in data:
+        raise ValueError("num_pairs must be specified in the input data")
+    num_pairs = data["max_questions"]    
+    input_text = process_input_text(input_text, use_mediawiki)
+    
+    output = MatchingGen.generate_matching(
+    input_text=input_text,  # Changed from text= to input_text=
+    num_pairs=num_pairs
+    )
+    
+    return jsonify({"output": output})
 
 @app.route("/get_shortq_hard", methods=["POST"])
 def get_shortq_hard():
